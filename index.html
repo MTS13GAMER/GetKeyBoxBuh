@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Gerador de Keys</title>
+  <style>
+    :root{--bg:#0f1724;--card:#111827;--accent:#7c3aed;--muted:#9ca3af;--glass:rgba(255,255,255,0.03)}
+    html,body{height:100%;margin:0;font-family:Inter, system-ui, Arial;background:linear-gradient(180deg,var(--bg),#071028);color:#e6eef8}
+    .wrap{max-width:900px;margin:40px auto;padding:20px}
+    .card{background:var(--card);padding:18px;border-radius:12px;box-shadow:0 6px 20px rgba(2,6,23,0.6)}
+    h1{margin:0 0 12px;font-size:20px}
+    .controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+    input[type=number]{width:90px;padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:var(--glass);color:inherit}
+    button{padding:8px 12px;border-radius:10px;border:0;cursor:pointer;background:var(--accent);color:white}
+    button.ghost{background:transparent;border:1px solid rgba(255,255,255,0.06)}
+    #keysList{margin-top:12px;max-height:300px;overflow:auto;padding:12px;border-radius:8px;background:linear-gradient(180deg,rgba(255,255,255,0.02),transparent)}
+    .keyRow{display:flex;justify-content:space-between;padding:6px 8px;border-radius:6px;margin-bottom:6px;background:rgba(255,255,255,0.02)}
+    .muted{color:var(--muted);font-size:13px}
+    .small{font-size:13px;padding:6px 8px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Gerador de Keys</h1>
+      <div class="muted">Gere chaves aleatórias e salve em um arquivo chamado <code>keys</code> no servidor (ou baixe localmente).</div>
+
+      <div class="controls" style="margin-top:12px">
+        <label class="small">Tamanho:</label>
+        <input id="length" type="number" min="6" max="64" value="16">
+        <button id="gen">Gerar</button>
+        <button id="add" class="ghost">Adicionar à lista</button>
+        <button id="clear" class="ghost">Limpar lista</button>
+        <button id="download" class="ghost">Baixar (keys.txt)</button>
+        <button id="send" class="ghost">Salvar no servidor</button>
+      </div>
+
+      <div id="last" style="margin-top:8px" class="muted">Última key: <strong id="lastKey">—</strong></div>
+
+      <div id="keysList" aria-live="polite"></div>
+
+      <div style="margin-top:10px" class="muted">Observações: Para salvar no servidor, coloque o arquivo <code>save_keys.php</code> no mesmo diretório.</div>
+    </div>
+  </div>
+
+<script>
+// Gera uma key segura usando crypto
+function generateKey(len){
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  const arr = new Uint8Array(len);
+  crypto.getRandomValues(arr);
+  let s = '';
+  for(let i=0;i<len;i++) s += alphabet[arr[i] % alphabet.length];
+  return s;
+}
+
+const genBtn = document.getElementById('gen');
+const addBtn = document.getElementById('add');
+const clearBtn = document.getElementById('clear');
+const downloadBtn = document.getElementById('download');
+const sendBtn = document.getElementById('send');
+const lengthInput = document.getElementById('length');
+const lastKeyEl = document.getElementById('lastKey');
+const keysList = document.getElementById('keysList');
+
+let currentKey = '';
+let keys = [];
+
+function renderList(){
+  keysList.innerHTML = '';
+  if(keys.length===0){ keysList.innerHTML = '<div class="muted">Nenhuma key adicionada</div>'; return }
+  keys.forEach((k,i)=>{
+    const row = document.createElement('div'); row.className='keyRow';
+    const left = document.createElement('div'); left.textContent = k;
+    const right = document.createElement('div');
+    const btnCopy = document.createElement('button'); btnCopy.textContent='Copiar'; btnCopy.className='small ghost';
+    btnCopy.onclick = ()=>{ navigator.clipboard.writeText(k); btnCopy.textContent='Copiado!'; setTimeout(()=>btnCopy.textContent='Copiar',900); }
+    const btnDel = document.createElement('button'); btnDel.textContent='Remover'; btnDel.className='small ghost';
+    btnDel.onclick = ()=>{ keys.splice(i,1); renderList(); }
+    right.appendChild(btnCopy); right.appendChild(btnDel);
+    row.appendChild(left); row.appendChild(right);
+    keysList.appendChild(row);
+  })
+}
+
+genBtn.addEventListener('click',()=>{
+  const len = parseInt(lengthInput.value)||16;
+  currentKey = generateKey(len);
+  lastKeyEl.textContent = currentKey;
+});
+
+addBtn.addEventListener('click',()=>{
+  if(!currentKey) { alert('Gere uma key primeiro'); return }
+  keys.push(currentKey);
+  currentKey = '';
+  lastKeyEl.textContent = '—';
+  renderList();
+});
+
+clearBtn.addEventListener('click',()=>{ if(confirm('Limpar todas as keys?')){ keys = []; renderList(); } });
+
+// Baixar arquivo localmente chamado keys.txt
+downloadBtn.addEventListener('click',()=>{
+  if(keys.length===0){ alert('Nenhuma key para salvar'); return }
+  const blob = new Blob([keys.join('\n')],{type:'text/plain'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'keys.txt';
+  document.body.appendChild(a); a.click(); a.remove();
+});
+
+// Envia para save_keys.php no servidor. Espera resposta JSON {ok:true}
+sendBtn.addEventListener('click',async ()=>{
+  if(keys.length===0){ alert('Nenhuma key para salvar'); return }
+  try{
+    // Se ativar token no PHP, substitua 'SEU_TOKEN_AQUI' pelo token correto
+    const payload = { keys, token: '' }; // deixe token vazio se não usar autenticação
+    const res = await fetch('save_keys.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const j = await res.json();
+    if(j.ok) { alert('Salvo no servidor com sucesso.'); keys=[]; renderList(); }
+    else alert('Erro ao salvar no servidor: '+(j.error||'unknown'));
+  }catch(e){ alert('Falha ao conectar com o servidor: '+e.message); }
+});
+
+// inicializa
+renderList();
+</script>
+
+</body>
+</html>
